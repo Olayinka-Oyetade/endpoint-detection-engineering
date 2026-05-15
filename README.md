@@ -1,84 +1,144 @@
-# T1543.003 — Malicious Windows Service Creation
+# Endpoint Detection Engineering | Splunk, Sysmon, MITRE ATT&CK
 
-**Tactic:** Persistence (TA0003)
-**Tool:** Splunk + Sysmon
-**Log Sources:** Sysmon Event ID 13, Windows Event ID 7045
-**Detection Status:** Confirmed True Positive
-**Report ID:** IR-2026-003
+A Windows endpoint detection engineering project built to simulate, detect, and investigate real-world adversary persistence and credential access techniques using Splunk, Sysmon, and Windows Event Logs.
+
+This project documents four complete attack simulations mapped to MITRE ATT&CK. Each simulation covers the full detection engineering workflow: lab setup, attack execution, Splunk detection rule development, alert validation, structured incident documentation, and lessons learned.
 
 ---
 
-## Overview
+## Project Overview
 
-This folder documents the full detection engineering workflow for MITRE ATT&CK technique T1543.003 — Windows Service Creation used as a persistence mechanism.
+| Technique | MITRE ID | Tactic | Detection Method |
+|---|---|---|---|
+| LSASS Credential Dumping | T1003.001 | Credential Access | Sysmon Event ID 10 (ProcessAccess) |
+| Malicious Service Creation | T1543.003 | Persistence | Sysmon Event ID 13 (RegistryValueSet) |
+| Registry Run Key Persistence | T1547.001 | Persistence | Sysmon Event ID 13 (RegistryValueSet) |
+| Scheduled Task Persistence | T1053.005 | Persistence | Sysmon Event ID 1 (Process Creation) |
 
-The attacker created a malicious Windows service called "WindowsHealthSvc" — named to blend in with legitimate system services — configured to execute a payload automatically at every system boot under SYSTEM privileges. No user interaction required. No login needed.
-
-Detection was achieved through Sysmon registry monitoring (Event ID 13) targeting the Windows service registry path, with the binary path as the primary indicator. Alert fired within 5 minutes of attack execution.
-
----
-
-## Why This Technique Matters
-
-A malicious service is one of the most durable persistence mechanisms on Windows:
-
-- Survives reboots indefinitely
-- Runs under SYSTEM — the highest privilege level on the machine
-- Requires no user to be logged in
-- Can be disguised with a legitimate-looking service name
-
-Real-world threat actors that use this technique include ransomware operators, APT groups, and commercial offensive frameworks like Cobalt Strike. Detecting it early — before the payload executes at next reboot — is a Tier 1 SOC priority.
+All four simulations resulted in confirmed true positive detections. Zero false positives after tuning.
 
 ---
 
-## Attack Summary
+## Environment
 
-| Field | Detail |
+| Component | Detail |
 |---|---|
-| **Attack method** | sc.exe via PowerShell with administrator access |
-| **Service name** | WindowsHealthSvc |
-| **Binary path** | cmd.exe /c malware.exe |
-| **Start type** | Auto (executes at every boot) |
-| **Privileges** | SYSTEM |
-| **Registry key** | HKLM\SYSTEM\CurrentControlSet\Services\WindowsHealthSvc\ImagePath |
+| **OS** | Windows 10 (WINDOWSVM10) |
+| **SIEM** | Splunk (Free Tier) |
+| **Telemetry** | Sysmon with custom ruleset |
+| **Log forwarding** | Splunk Universal Forwarder |
+| **Detection framework** | MITRE ATT&CK |
+| **Documentation standard** | ServiceNow-style incident reporting |
 
 ---
 
-## Detection Summary
+## Repository Structure
 
-| Field | Detail |
+Each folder contains a complete investigation package for one attack simulation:
+
+```
+endpoint-detection-engineering/
+│
+├── T1003.001-LSASS-Credential-Dumping/
+│   ├── README.md
+│   ├── LSASS-01-incident-report.md
+│   ├── LSASS-02-detection-logic.md
+│   ├── LSASS-03-lessons-learned.md
+│   └── LSASS-04-portfolio-case-study.md
+│
+├── T1543.003-Malicious-Service-Creation/
+│   ├── README.md
+│   ├── ServiceCreation-01-incident-report.md
+│   ├── ServiceCreation-02-detection-logic.md
+│   ├── ServiceCreation-03-lessons-learned.md
+│   └── ServiceCreation-04-portfolio-case-study.md
+│
+├── T1547.001-Registry-Run-Keys/
+│   ├── README.md
+│   ├── RegistryRunKeys-01-incident-report.md
+│   ├── RegistryRunKeys-02-detection-logic.md
+│   ├── RegistryRunKeys-03-lessons-learned.md
+│   └── RegistryRunKeys-04-portfolio-case-study.md
+│
+└── T1053.005-Scheduled-Tasks/
+    ├── README.md
+    ├── ScheduledTasks-01-incident-report.md
+    ├── ScheduledTasks-02-detection-logic.md
+    ├── ScheduledTasks-03-lessons-learned.md
+    └── ScheduledTasks-04-portfolio-case-study.md
+```
+
+---
+
+## Simulations
+
+### T1003.001 — LSASS Credential Dumping
+
+LSASS (Local Security Authority Subsystem Service) stores active user credentials in memory. An attacker with local administrator access used Windows Task Manager to create a full memory dump of the LSASS process, exposing all cached credentials on the machine.
+
+**Detection:** Sysmon Event ID 10 (ProcessAccess) flagged a non-system process accessing lsass.exe with GrantedAccess value 0x1fffff (PROCESS_ALL_ACCESS). Corroborated by Event ID 11 (FileCreate) logging the dump file written to the Temp directory.
+
+**Result:** Alert fired within 3 minutes. True positive confirmed. Zero false positives.
+
+---
+
+### T1543.003 — Malicious Service Creation
+
+A Windows service named "WindowsHealthSvc" was created using sc.exe, configured to execute a payload automatically at every system boot under SYSTEM privileges. The service name was chosen to blend in with legitimate Windows background processes.
+
+**Detection:** Sysmon Event ID 13 (RegistryValueSet) caught the service binary path written to `HKLM\SYSTEM\CurrentControlSet\Services\WindowsHealthSvc\ImagePath`. The binary path (cmd.exe /c malware.exe) was the definitive indicator — no legitimate service points to cmd.exe.
+
+**Result:** Alert fired within 5 minutes. True positive confirmed. Zero false positives after removing LocalSystem filter.
+
+---
+
+### T1547.001 — Registry Run Key Persistence
+
+PowerShell wrote a malicious entry named "WindowsUpdate" to the HKCU Run key, pointing to a payload in C:\Users\Public. The entry name was chosen to appear indistinguishable from a legitimate Windows startup entry. No administrator privileges were required.
+
+**Detection:** Sysmon Event ID 13 (RegistryValueSet) captured the source process (powershell.exe), full registry path, and payload location in a single event. PowerShell modifying a Run key with a payload in a world-writable directory is a zero-ambiguity true positive.
+
+**Result:** Alert fired within 5 minutes. Pre-execution detection — payload had not yet run. Zero false positives.
+
+---
+
+### T1053.005 — Scheduled Task Persistence
+
+A scheduled task named "MicrosoftEdgeUpdateTaskCore" was registered via PowerShell, configured to execute a payload every 5 minutes under SYSTEM privileges with RunLevel Highest. The task name mirrors the naming convention of legitimate Microsoft scheduled tasks.
+
+**Detection:** Sysmon Event ID 1 (Process Creation) captured the full PowerShell command including task name, payload path, trigger interval, and privilege level. Corroborated by Event ID 11 logging the task XML file written to C:\Windows\System32\Tasks\.
+
+**Result:** Alert fired within 3 minutes — before the first 5-minute trigger elapsed. Pre-execution detection. Zero false positives.
+
+---
+
+## Documentation Standard
+
+Each simulation includes four documents:
+
+| Document | Contents |
 |---|---|
-| **Primary detection** | Sysmon Event ID 13 — RegistryValueSet on Services path |
-| **Secondary detection** | Windows Event ID 7045 — New service installed |
-| **Key indicator** | Binary path (cmd.exe) outside trusted system directories |
-| **Alert time** | Under 5 minutes from attack execution |
-| **False positives** | 0 after tuning |
-| **Severity** | CRITICAL (cmd.exe binary path) |
+| **Incident Report** | Executive summary, timeline, attack narrative, detection details, impact assessment, response actions, recommendations |
+| **Detection Logic** | SPL queries, key field explanations, exclusion logic, false positive analysis, alert configuration, investigation runbook, MITRE mapping |
+| **Lessons Learned** | What worked, what needed tuning, what to do differently, key takeaways for SOC work |
+| **Portfolio Case Study** | End to end investigation walkthrough written for a security hiring audience |
 
 ---
 
-## MITRE ATT&CK Mapping
+## Skills Demonstrated
 
-| Field | Value |
-|---|---|
-| **Technique** | T1543.003 — Create or Modify System Process: Windows Service |
-| **Tactic** | Persistence (TA0003) |
-| **Also relevant** | Privilege Escalation (TA0004) — services execute as SYSTEM |
-| **Data sources** | Windows Registry (DS0024), Process (DS0009) |
-
----
-
-## Files in This Folder
-
-| File | Description |
-|---|---|
-| `ServiceCreation-01-incident-report.md` | Full incident report following SOC documentation standards |
-| `ServiceCreation-02-detection-logic.md` | SPL queries, field explanations, false positive analysis, investigation runbook |
-| `ServiceCreation-03-lessons-learned.md` | What worked, what needed tuning, and what to do differently |
-| `ServiceCreation-04-portfolio-case-study.md` | End to end investigation walkthrough from alert to resolution |
+- Splunk SPL detection rule development and alert configuration
+- Sysmon event log analysis across Event ID 1, 10, 11, and 13
+- MITRE ATT&CK technique mapping and triage
+- Detection tuning and false positive reduction
+- Structured incident documentation to SOC standard
+- Behaviour-based detection over signature-based detection
+- End to end investigation workflow: alert, triage, investigation, containment, documentation
 
 ---
 
-## Key Finding
+## Analyst
 
-The binary path in the Details field of Sysmon Event ID 13 is the highest-fidelity indicator for this technique. No legitimate Windows service or commercial software installs itself by pointing to cmd.exe, PowerShell, or a user-writable directory. This single check delivers near-zero false positives while catching the full range of service-based persistence methods regardless of the tool used to create the service.
+**Olayinka Daniel Oyetade** | SOC Analyst | Toronto, Canada
+
+[LinkedIn](https://www.linkedin.com/in/olayinka-oyetade-0120171a2/) · [Portfolio](https://olayinkaoyetade.com)
